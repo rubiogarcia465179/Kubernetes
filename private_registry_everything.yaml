@@ -1,0 +1,64 @@
+apiVersion: apps/v1                                     #by default
+kind: Deployment                                        # type of file (deployment, service, pod, etc)
+metadata:                                               #Describes metadata of the deployment
+  name: private-repository-k8s                          #Name of deployment
+  labels:                                               #
+    app: private-repository-k8s                         #Label of deployment (to be reached by other services. Service with name private-repository-THS will be applied to deplyments with app=private-repository-THS)
+spec:                                                   # Specs of the deployment
+  replicas: 2                                           # It will have 2 replicas
+  selector:                                             #
+    matchLabels:                                        #
+      app: private-repository-k8s                       #
+  template:                                             # Template is actually a pod template, that determines how the pods will be launched
+    metadata:                                           #
+      labels:                                           #
+        app: private-repository-k8s                     # Field used to determine what kind of services will be applied to these pods. That means, this pods will have this label if any services want to be applied to them
+    spec:                                               # specs of the pods
+      volumes:                                          # Volumes from the host machines that the pods will mount on their OS
+      - name: certs-vol #Name                           # name of the physical volume from computer
+        hostPath:                                       #
+          path: /opt/certs                              # Path of the physical machine that owns kubernetes where the info will be permanently stored.
+          type: Directory                               # it is a directory
+      - name: registry-vol                              # Name of the physical volume from computer. I think it is needed to bind to volume mounts (bottom of the manifest)
+        hostPath:                                       #
+          path: /opt/registry                           # Path of the physical machine that owns kubernetes where the info about Docker Local registry will be permanently stored.
+          type: Directory                               # type, it is a directory
+                                                        #
+      containers:                                       #
+        - image: registry:2                             #Name of image to be downloaded by dockerhub
+          name: private-repository-k8s                  # Name to be given to the container
+          imagePullPolicy: IfNotPresent                 # Pull image from docker hub if not present locally
+          env:                                          #
+          - name: REGISTRY_HTTP_TLS_CERTIFICATE         # Enviromental variables needed for deploying a docker contrainer
+            value: "/certs/registry.crt"                # value of variable for where to find certificate inside the pod
+          - name: REGISTRY_HTTP_TLS_KEY                 #
+            value: "/certs/registry.key"                #value of variable for where to find key inside the pod
+          ports:                                        #
+            - containerPort: 5000                       # port where the container will output information. It can ingest and show information on this port.
+          volumeMounts:                                 # It declares in which part of the POD will the volumes be stored. It syncronises with the colume mounts at the end of the file
+          - name: certs-vol                             # Name of volume
+            mountPath: /certs                           # Path inside the pod where I want my volume to be mounted
+          - name: registry-vol                          # I think Name is needed to bind (or mount) volume into the volumemount from the pods.
+            mountPath: /var/lib/registry                #Docker local registry info is saved in this path inside the pod/
+
+---        
+apiVersion: v1                         #
+kind: Service                          # type of yaml file
+metadata:                              #metadata of the service
+  labels:                              #
+    app: private-repository-THS        #
+  name: private-repository-THS         #name that service will have in cluster
+spec:                                  #specs of the service
+  ports:                               #data about ports
+  - port: 5000                         # If you send something to port 5000, it will be redirected to port indicated in target port.
+    nodePort: 31320                    #
+    protocol: TCP                      # Traffic comes in on nodePort, forwards to port on the service which then routes to targetPort on the pod(s).
+    targetPort: 5000                   # Port in which the application is running inside the container inside the pod
+  selector:                            #
+    app: private-repository-THS        #selector used. The service will be applied to those pods that have this app name.
+  type: NodePort                       #
+  #t's worth emphasizing more that nodePort is for external traffic. Other pods in the cluster 
+  #that may need to access the service will just use port, not nodePort as it's internal only access to the service.
+  #Also worth noting that if targetPort is not set, it will default to the same value as port. E.g. 80:80 for service port 80 targeting container port 80.
+
+---
